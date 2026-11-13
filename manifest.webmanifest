@@ -2,31 +2,16 @@
   "name": "ぱしゃっと管理",
   "short_name": "ぱしゃっと管理",
   "description": "ぱしゃっとの管理者アプリ",
-  "id": "./",
-  "start_url": "./",
-  "scope": "./",
+  "id": "/pasha-admin/",
+  "start_url": "/pasha-admin/",
+  "scope": "/pasha-admin/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#eef8ff",
   "theme_color": "#eef8ff",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
