@@ -146,7 +146,7 @@ function askForm(title, fields, okLabel = "OK", validate) {
   });
 }
 function topbar(title, actions = []) {
-  return el("header", { class: "top" }, el("span", { class: "icon" }), el("h1", {}, title), ...actions);
+  return el("header", { class: "top" }, el("span", { class: "icon" }), el("h1", {}, title), ...(actions.length ? actions : [el("span", { class: "icon" })]));
 }
 function tabsBar(active, openCount) {
   return el("nav", { class: "tabsbar" },
@@ -156,7 +156,7 @@ function tabsBar(active, openCount) {
 }
 
 // ====== Supabase / ログイン ======
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: "pasha-admin-auth", persistSession: true, autoRefreshToken: true } });
 let me = null, profile = null, quietSignOut = false, routeSeq = 0;
 
 sb.auth.onAuthStateChange(event => {
