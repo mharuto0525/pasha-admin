@@ -25,8 +25,16 @@ a{color:inherit}
 .top h1{flex:1;margin:0;font-size:18px;text-align:center;white-space:nowrap}
 .top .icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:22px;text-decoration:none;background:none;border:0;cursor:pointer}
 .tabsbar{display:flex;gap:8px;padding:10px 14px 0;max-width:520px;margin:0 auto}
-.tabsbar a{flex:1;text-align:center;padding:10px;border-radius:999px;border:1px solid var(--line);text-decoration:none;font-weight:700;font-size:14px;background:transparent;position:relative}
+.tabsbar{gap:6px}
+.tabsbar a{flex:1;text-align:center;padding:10px 4px;border-radius:999px;border:1px solid var(--line);text-decoration:none;font-weight:700;font-size:14px;background:transparent;position:relative}
 .tabsbar a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+textarea{display:block;width:100%;margin-top:6px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:16px;min-height:96px;resize:vertical;font-family:inherit}
+.pick{max-height:260px;overflow:auto;margin-top:8px}
+.pick label{display:flex;align-items:center;gap:10px;margin:0;padding:8px 4px;color:var(--ink);font-size:15px;border-bottom:1px solid var(--line)}
+.pick input{width:20px;height:20px}
+.radios{display:flex;gap:8px;margin-top:10px}
+.radios button{flex:1;padding:10px;border-radius:999px;border:1px solid var(--line);background:transparent;font-weight:700;cursor:pointer}
+.radios button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .dotbadge{display:inline-block;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--danger);color:#fff;font-size:11px;line-height:18px}
 .wrap{max-width:520px;margin:0 auto;padding:14px 14px 60px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 18px;border-radius:999px;border:0;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;text-decoration:none}
@@ -148,11 +156,15 @@ function askForm(title, fields, okLabel = "OK", validate) {
 function topbar(title, actions = []) {
   return el("header", { class: "top" }, el("span", { class: "icon" }), el("h1", {}, title), ...(actions.length ? actions : [el("span", { class: "icon" })]));
 }
-function tabsBar(active, openCount) {
+function tabsBar(active, counts) {
+  const c = counts || {};
+  const tab = (key, href, label, n) => el("a", { class: active === key ? "on" : "", href }, label, n ? el("span", { class: "dotbadge" }, n) : null);
   return el("nav", { class: "tabsbar" },
-    el("a", { class: active === "ids" ? "on" : "", href: "#/" }, "ID管理"),
-    el("a", { class: active === "reports" ? "on" : "", href: "#/reports" }, "通報", openCount ? el("span", { class: "dotbadge" }, openCount) : null),
-    el("a", { class: active === "settings" ? "on" : "", href: "#/settings" }, "設定"));
+    tab("approve", "#/", "承認", c.approve),
+    tab("reports", "#/reports", "通報", c.reports),
+    tab("notice", "#/notice", "お知らせ"),
+    tab("ids", "#/ids", "ID"),
+    tab("settings", "#/settings", "設定"));
 }
 
 // ====== Supabase / ログイン ======
@@ -213,7 +225,9 @@ async function route() {
       const hash = location.hash || "#/";
       if (hash === "#/reports") await reportsPage(root);
       else if (hash === "#/settings") await settingsPage(root);
-      else await idsPage(root);
+      else if (hash === "#/ids") await idsPage(root);
+      else if (hash === "#/notice") await noticePage(root);
+      else await approvePage(root);
     }
   } catch (e) {
     console.error(e);
@@ -286,9 +300,75 @@ function notAdminPage(root) {
     el("button", { class: "btn ghost big", onclick: logout }, "ログアウト")));
 }
 
-async function openReportCount() {
-  const { data } = await sb.rpc("admin_list_reports");
-  return (data || []).filter(r => r.status === "open").length;
+async function badgeCounts() {
+  const [r, c] = await Promise.all([sb.rpc("admin_list_reports"), sb.rpc("admin_list_id_changes")]);
+  return {
+    reports: (r.data || []).filter(x => x.status === "open").length,
+    approve: (c.data || []).length
+  };
+}
+
+// ====== 承認（届け出） ======
+async function approvePage(root) {
+  const counts = await badgeCounts();
+  const { data: ch, error } = await sb.rpc("admin_list_id_changes");
+  if (error) throw error;
+  async function decideId(r, ok) {
+    if (!confirm(ok ? `@${r.old_id} を @${r.new_id} に変更しますか？` : "この届け出を却下しますか？")) return;
+    const { error: e } = await sb.rpc("admin_resolve_id_change", { p_id: r.id, p_approve: ok });
+    if (e) { toast(e.message); return; }
+    toast(ok ? "IDを変更しました" : "却下しました");
+    route();
+  }
+  const kids = [el("div", { class: "card" }, el("h2", {}, "IDの変更届"),
+    ch && ch.length
+      ? el("div", { class: "rows" }, ch.map(r => el("div", { class: "rowi" },
+          el("div", { class: "who2" }, `@${r.old_id} → `, el("b", {}, "@" + r.new_id), el("br"), el("small", {}, fmt(r.created_at))),
+          el("div", { class: "ops" },
+            el("button", { class: "btn ghost sm", onclick: () => decideId(r, false) }, "却下"),
+            el("button", { class: "btn sm", onclick: () => decideId(r, true) }, "承認")))))
+      : el("p", { class: "empty", style: "padding:14px" }, "届け出はありません"))];
+  root.append(topbar("管理者"), tabsBar("approve", counts), el("main", { class: "wrap" }, ...kids));
+}
+
+// ====== お知らせ ======
+async function noticePage(root) {
+  const counts = await badgeCounts();
+  const [pe, hi] = await Promise.all([sb.rpc("admin_list_people"), sb.rpc("admin_list_announcements")]);
+  if (pe.error) throw pe.error;
+  const people = pe.data || [];
+  let target = "all";
+  const text = el("textarea", { maxlength: 190, placeholder: "例：今週末にメンテナンスをします" });
+  const pick = el("div", { class: "pick", style: "display:none" }, people.map(u => el("label", {},
+    el("input", { type: "checkbox", value: u.user_id }), el("span", {}, "@" + u.login_id, " ", el("small", { class: "sub" }, u.display_name)))));
+  const bAll = el("button", { type: "button", class: "on", onclick: () => setT("all") }, "全員");
+  const bSel = el("button", { type: "button", onclick: () => setT("sel") }, "選んで送る");
+  function setT(t) { target = t; bAll.className = t === "all" ? "on" : ""; bSel.className = t === "sel" ? "on" : ""; pick.style.display = t === "sel" ? "block" : "none"; }
+  async function send() {
+    const t = text.value.trim();
+    if (!t) { toast("内容を入力してください"); return; }
+    let users = null;
+    if (target === "sel") {
+      users = [...pick.querySelectorAll("input:checked")].map(i => i.value);
+      if (!users.length) { toast("送る相手を選んでください"); return; }
+    }
+    if (!confirm(users ? `${users.length}人にお知らせを送りますか？` : "全員にお知らせを送りますか？")) return;
+    const { data, error } = await sb.rpc("admin_broadcast", { p_text: t, p_users: users });
+    if (error) { toast(error.message); return; }
+    toast(`${data}人に送りました`);
+    route();
+  }
+  const hist = hi.data || [];
+  root.append(topbar("管理者"), tabsBar("notice", counts), el("main", { class: "wrap" },
+    el("div", { class: "card" }, el("h2", {}, "お知らせを送る"),
+      el("label", {}, "内容（190文字まで）", text),
+      el("div", { class: "radios" }, bAll, bSel), pick,
+      el("button", { class: "btn big", onclick: send }, "送信"),
+      el("p", { class: "note" }, "アプリの🔔通知に届きます。通知をオンにしている人には、スマホにも通知されます。")),
+    hist.length ? el("div", { class: "card" }, el("h2", {}, "送ったお知らせ"),
+      el("div", { class: "rows" }, hist.map(a => el("div", { class: "rowi" },
+        el("div", { class: "who2", style: "white-space:normal;line-height:1.6" }, a.text, el("br"),
+          el("small", {}, `${fmt(a.created_at)} ・ ${a.to_all ? "全員" : "選んだ人"}（${a.target_count}人）`)))))) : null));
 }
 
 // ====== ID管理 ======
@@ -338,7 +418,7 @@ async function idsPage(root) {
     load();
   }
 
-  const openCount = await openReportCount();
+  const openCount = await badgeCounts();
   root.append(topbar("管理者"), tabsBar("ids", openCount), el("main", { class: "wrap" },
     el("div", { class: "card" },
       el("h2", {}, "IDを発行する"),
@@ -406,7 +486,8 @@ async function reportsPage(root) {
           el("small", {}, `${r.group_name || "?"} / ${r.poster_name || "?"} / ${r.reason}`)),
         el("small", {}, r.resolved_at ? fmt(r.resolved_at) : ""))))));
   }
-  root.append(topbar("管理者"), tabsBar("reports", open.length), el("main", { class: "wrap" }, ...kids));
+  const cnts = await badgeCounts();
+  root.append(topbar("管理者"), tabsBar("reports", cnts), el("main", { class: "wrap" }, ...kids));
 }
 
 // ====== 設定 ======
@@ -424,7 +505,7 @@ async function settingsPage(root) {
       toast("パスワードを変更しました。忘れないようにメモしてください");
     }
   }, "パスワードを変更");
-  const openCount = await openReportCount();
+  const openCount = await badgeCounts();
   root.append(topbar("管理者"), tabsBar("settings", openCount), el("main", { class: "wrap" },
     el("div", { class: "card" }, el("div", { class: "sub" }, "ログイン中のID"), el("h2", {}, "@" + profile.login_id)),
     el("div", { class: "card" },
