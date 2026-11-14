@@ -300,19 +300,38 @@ function notAdminPage(root) {
     el("button", { class: "btn ghost big", onclick: logout }, "ログアウト")));
 }
 
+const fullName = u => (u.last_name ? `${u.last_name} ${u.first_name}` : "") + (u.affiliation ? `（${u.affiliation}）` : "");
 async function badgeCounts() {
-  const [r, c] = await Promise.all([sb.rpc("admin_list_reports"), sb.rpc("admin_list_id_changes")]);
+  const [r, c, g, w] = await Promise.all([sb.rpc("admin_list_reports"), sb.rpc("admin_list_id_changes"),
+    sb.rpc("admin_list_registrations"), sb.rpc("admin_list_resets")]);
   return {
     reports: (r.data || []).filter(x => x.status === "open").length,
-    approve: (c.data || []).length
+    approve: (c.data || []).length + (g.data || []).length + (w.data || []).length
   };
 }
 
 // ====== 承認（届け出） ======
 async function approvePage(root) {
   const counts = await badgeCounts();
-  const { data: ch, error } = await sb.rpc("admin_list_id_changes");
-  if (error) throw error;
+  const [chr, rgr, rsr] = await Promise.all([sb.rpc("admin_list_id_changes"), sb.rpc("admin_list_registrations"), sb.rpc("admin_list_resets")]);
+  if (chr.error) throw chr.error;
+  if (rgr.error) throw rgr.error;
+  if (rsr.error) throw rsr.error;
+  const ch = chr.data, rg = rgr.data || [], rs = rsr.data || [];
+  async function decideReg(r, ok) {
+    if (!confirm(ok ? `${r.last_name} ${r.first_name}（${r.affiliation}）を承認しますか？` : "この申請を却下しますか？")) return;
+    const { error: e } = await sb.rpc("admin_resolve_registration", { p_id: r.id, p_approve: ok });
+    if (e) { toast(e.message); return; }
+    toast(ok ? "承認しました" : "却下しました");
+    route();
+  }
+  async function decideReset(r, ok) {
+    if (!confirm(ok ? `${r.last_name} ${r.first_name} さんのパスワード再設定を承認しますか？\n本人が申請したパスワードに変わります。` : "この申請を却下しますか？")) return;
+    const { error: e } = await sb.rpc("admin_resolve_reset", { p_id: r.id, p_approve: ok });
+    if (e) { toast(e.message); return; }
+    toast((ok ? "承認しました" : "却下しました") + (r.has_email ? "。メールで知らせます" : ""));
+    route();
+  }
   async function decideId(r, ok) {
     if (!confirm(ok ? `@${r.old_id} を @${r.new_id} に変更しますか？` : "この届け出を却下しますか？")) return;
     const { error: e } = await sb.rpc("admin_resolve_id_change", { p_id: r.id, p_approve: ok });
@@ -320,14 +339,32 @@ async function approvePage(root) {
     toast(ok ? "IDを変更しました" : "却下しました");
     route();
   }
-  const kids = [el("div", { class: "card" }, el("h2", {}, "IDの変更届"),
+  const opsFor = (r, fn) => el("div", { class: "ops" },
+    el("button", { class: "btn ghost sm", onclick: () => fn(r, false) }, "却下"),
+    el("button", { class: "btn sm", onclick: () => fn(r, true) }, "承認"));
+  const kids = [
+    el("div", { class: "card" }, el("h2", {}, "新規登録の申請"),
+      rg.length ? el("div", { class: "rows" }, rg.map(r => el("div", { class: "rowi" },
+        el("div", { class: "who2", style: "white-space:normal;line-height:1.6" }, el("b", {}, `${r.last_name} ${r.first_name}`), el("br"), r.affiliation, el("br"), el("small", {}, fmt(r.created_at))),
+        opsFor(r, decideReg))))
+      : el("p", { class: "empty", style: "padding:14px" }, "申請はありません")),
+    el("div", { class: "card" }, el("h2", {}, "パスワード再設定の申請"),
+      rs.length ? el("div", { class: "rows" }, rs.map(r => el("div", { class: "rowi" },
+        el("div", { class: "who2", style: "white-space:normal;line-height:1.6" }, el("b", {}, `${r.last_name} ${r.first_name}`), " ",
+          el("small", {}, r.has_email ? "✉あり" : "✉なし"), el("br"),
+          "申請の所属：", el("b", {}, r.affiliation), el("br"), el("small", {}, "登録の所属：" + (r.reg_affiliation || "（未登録）")), el("br"), el("small", {}, fmt(r.created_at))),
+        opsFor(r, decideReset))))
+      : el("p", { class: "empty", style: "padding:14px" }, "申請はありません"),
+      el("p", { class: "note" }, "苗字・名前・IDが登録と合っている申請だけが届きます。所属が合っているか確認して承認してください。")),
+    el("div", { class: "card" }, el("h2", {}, "IDの変更届"),
     ch && ch.length
       ? el("div", { class: "rows" }, ch.map(r => el("div", { class: "rowi" },
           el("div", { class: "who2" }, `@${r.old_id} → `, el("b", {}, "@" + r.new_id), el("br"), el("small", {}, fmt(r.created_at))),
           el("div", { class: "ops" },
             el("button", { class: "btn ghost sm", onclick: () => decideId(r, false) }, "却下"),
             el("button", { class: "btn sm", onclick: () => decideId(r, true) }, "承認")))))
-      : el("p", { class: "empty", style: "padding:14px" }, "届け出はありません"))];
+      : el("p", { class: "empty", style: "padding:14px" }, "届け出はありません"))
+  ];
   root.append(topbar("管理者"), tabsBar("approve", counts), el("main", { class: "wrap" }, ...kids));
 }
 
@@ -340,7 +377,7 @@ async function noticePage(root) {
   let target = "all";
   const text = el("textarea", { maxlength: 190, placeholder: "例：今週末にメンテナンスをします" });
   const pick = el("div", { class: "pick", style: "display:none" }, people.map(u => el("label", {},
-    el("input", { type: "checkbox", value: u.user_id }), el("span", {}, "@" + u.login_id, " ", el("small", { class: "sub" }, u.display_name)))));
+    el("input", { type: "checkbox", value: u.user_id }), el("span", {}, "@" + u.login_id, " ", el("small", { class: "sub" }, fullName(u) || "（本名未登録）")))));
   const bAll = el("button", { type: "button", class: "on", onclick: () => setT("all") }, "全員");
   const bSel = el("button", { type: "button", onclick: () => setT("sel") }, "選んで送る");
   function setT(t) { target = t; bAll.className = t === "all" ? "on" : ""; bSel.className = t === "sel" ? "on" : ""; pick.style.display = t === "sel" ? "block" : "none"; }
@@ -387,7 +424,7 @@ async function idsPage(root) {
   }
   async function delId(u) {
     const msg = u.registered
-      ? `@${u.login_id}（${u.display_name}）を削除しますか？\nこの人はログインできなくなります。投稿した写真は残ります。`
+      ? `@${u.login_id} ${fullName(u)}を削除しますか？\nこの人はログインできなくなります。投稿した写真は残ります。`
       : `@${u.login_id} の発行を取り消しますか？`;
     if (!confirm(msg)) return;
     const { error } = await sb.rpc("admin_delete_id", { p_login_id: u.login_id });
@@ -398,7 +435,7 @@ async function idsPage(root) {
   function rowFor(u) {
     return el("div", { class: "rowi" },
       el("div", { class: "who2" }, el("b", {}, "@" + u.login_id), " ",
-        u.registered ? el("small", {}, u.display_name) : el("small", {}, "（まだ登録していません）")),
+        u.registered ? el("small", {}, fullName(u) || "（本名未登録）", u.reg_status && u.reg_status !== "approved" ? "［承認待ち・却下］" : "") : el("small", {}, "（まだ登録していません）")),
       el("div", { class: "ops" },
         u.registered ? el("button", { class: "btn ghost sm", onclick: () => resetPw(u) }, "再設定") : null,
         el("button", { class: "btn danger sm", onclick: () => delId(u) }, "削除")));
