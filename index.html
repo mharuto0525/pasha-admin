@@ -543,8 +543,24 @@ async function settingsPage(root) {
     }
   }, "パスワードを変更");
   const openCount = await badgeCounts();
+  const LIMIT = 1024 * 1024 * 1024;
+  const mb = n => (n / 1048576).toFixed(n >= 104857600 ? 0 : 1) + "MB";
+  const usage = el("div", { class: "card" }, el("h2", {}, "ストレージの使用量"), el("p", { class: "note" }, "読み込み中…"));
+  sb.rpc("admin_storage_usage").then(({ data, error }) => {
+    const r = Array.isArray(data) ? data[0] : data;
+    if (error || !r) { usage.replaceChildren(el("h2", {}, "ストレージの使用量"), el("p", { class: "note" }, "取得できませんでした（SQLの実行が必要です）")); return; }
+    const used = Number(r.bytes) || 0, pct = Math.min(100, used / LIMIT * 100);
+    const color = pct >= 90 ? "#d93a4a" : pct >= 70 ? "#e0a020" : "#3aa66b";
+    usage.replaceChildren(
+      el("h2", {}, "ストレージの使用量"),
+      el("div", { style: "font-size:26px;font-weight:800;margin:6px 0" }, mb(used), el("small", { style: "font-size:14px;font-weight:400" }, " / 1GB（無料枠）")),
+      el("div", { style: "height:14px;background:#eadfd3;border-radius:999px;overflow:hidden" }, el("div", { style: `height:100%;width:${pct}%;background:${color}` })),
+      el("p", { class: "note" }, `写真 ${r.photos}枚・動画 ${r.videos}本（計${r.files}ファイル）　使用率 ${pct.toFixed(1)}%`),
+      pct >= 80 ? el("p", { class: "note", style: "color:#d93a4a" }, "そろそろいっぱいです。不要な投稿の削除か、有料プランを検討してください。") : el("span"));
+  });
   root.append(topbar("管理者"), tabsBar("settings", openCount), el("main", { class: "wrap" },
     el("div", { class: "card" }, el("div", { class: "sub" }, "ログイン中のID"), el("h2", {}, "@" + profile.login_id)),
+    usage,
     el("div", { class: "card" },
       el("h2", {}, "パスワードを変える"),
       el("label", {}, "新しいパスワード（6桁の数字）", pw1),
